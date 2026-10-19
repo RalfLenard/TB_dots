@@ -73,6 +73,23 @@ class PdfRecordController extends Controller
     private const CF2B_HCI_DATE_Y    = 1298;
     private const CF2B_SIGNED_IV     = ['m' => [686, 704], 'd' => [732, 750], 'y' => [778, 796, 814, 832]];
 
+    /** CF-2 back, Part III-B: checkbox centres (x, y). The boxes are 13px. */
+    private const CF2B_REL_BOX = [
+        'spouse'  => [240.5, 1144.5],
+        'child'   => [306.5, 1144.5],
+        'parent'  => [367.5, 1144.5],
+        'sibling' => [240.5, 1161.5],
+        'others'  => [306.5, 1161.5],
+    ];
+    private const CF2B_REASON_BOX = [
+        'incapacitated' => [240.5, 1180.5],   // Patient is Incapacitated
+        'other'         => [240.5, 1197.5],   // Other Reasons
+    ];
+    private const CF2B_WHO_BOX = [
+        'patient'        => [527.5, 1182.5],  // right side: Patient
+        'representative' => [527.5, 1198.5],  // right side: Representative
+    ];
+
     private float $k = 1;
 
     /** Live nudges for page 3 (px). Override in the URL: ?acc_dy=-2&date_dy=-3&name_dy=-4 */
@@ -533,12 +550,53 @@ class PdfRecordController extends Controller
         $this->txt($pdf, $x, $ny + $this->nudge['name'], $signer, 10, $w);
         $this->signedDate($pdf, self::CF2B_PATIENT_DATE_Y + $this->nudge['date'], $signed, self::CF2B_SIGNED, self::CF2B_DATE_SIZE);
 
+        // Part III-B: relationship / reason / Patient-Representative boxes
+        $this->cf2bConsent($pdf, $d);
+
         // Part IV: HCI representative (date signed, day blank)
         [$x, $ny, $w] = self::CF2B_HCI_NAME;
         $this->txt($pdf, $x, $ny + $this->nudge['name'], $d['hci_rep_name'], 10, $w);                  // CRISTEL C. SINIO
         [$x, $ny, $w] = self::CF2B_HCI_DESIG;
         $this->txt($pdf, $x, $ny + $this->nudge['name'], $d['hci_rep_designation'], 10, $w);           // PHILHEALTH COORDINATOR
         $this->signedDate($pdf, self::CF2B_HCI_DATE_Y + $this->nudge['date'], $signed, self::CF2B_SIGNED_IV, self::CF2B_DATE_SIZE);
+    }
+
+    /**
+     * CF-2 back, Part III-B: same signer as CSF Part III.
+     *  - no representative -> tick "Patient"
+     *  - representative    -> tick "Representative", the relationship box and the reason box
+     *                         (plus the "Others, Specify" / "Other Reasons" text)
+     */
+    private function cf2bConsent(Fpdi $pdf, array $d): void
+    {
+        $byRep = ($d['part3_signer'] ?? 'patient') === 'representative';
+
+        [$wx, $wy] = self::CF2B_WHO_BOX[$byRep ? 'representative' : 'patient'];
+        $this->check($pdf, $wx, $wy, 9);
+
+        if (!$byRep) return;
+
+        // Relationship of the representative to the member/patient
+        $rel = strtolower((string) ($d['representative_relationship'] ?? ''));
+        if (isset(self::CF2B_REL_BOX[$rel])) {
+            [$x, $y] = self::CF2B_REL_BOX[$rel];
+            $this->check($pdf, $x, $y, 9);
+
+            if ($rel === 'others') {
+                $this->txt($pdf, 398, 1161, $d['representative_relationship_other'] ?? '', 9, 105);
+            }
+        }
+
+        // Reason for signing on behalf of the member/patient
+        $reason = (string) ($d['representative_reason'] ?? '');
+        if (isset(self::CF2B_REASON_BOX[$reason])) {
+            [$x, $y] = self::CF2B_REASON_BOX[$reason];
+            $this->check($pdf, $x, $y, 9);
+
+            if ($reason === 'other') {
+                $this->txt($pdf, 330, 1197, $d['representative_reason_other'] ?? '', 9, 170);
+            }
+        }
     }
 
     /* ----------------------------- helpers ----------------------------- */
@@ -743,10 +801,10 @@ class PdfRecordController extends Controller
         ])));
     }
 
-    /** Check mark centred on (cx, cy) px. */
-    private function check(Fpdi $pdf, float $cx, float $cy): void
+    /** Check mark centred on (cx, cy) px. $fontSize 9 is used for the small 13px boxes. */
+    private function check(Fpdi $pdf, float $cx, float $cy, float $fontSize = 11): void
     {
-        $pdf->SetFont('zapfdingbats', '', 11);
+        $pdf->SetFont('zapfdingbats', '', $fontSize);
         $w = 6;
         $this->put($pdf, $cx * $this->k - $w / 2, $cy * $this->k, $w, '4', 'C');
     }
