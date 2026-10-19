@@ -124,9 +124,10 @@ class PdfRecordController extends Controller
             'form_data'    => ['required', 'array'],
         ]);
 
+        // Always rebuild the listing name from the current form data. The old code kept the
+        // previously saved patient_name (the form sends it back), so the table never updated.
         $fd = $this->resolve($data['form_data']);
-        $data['patient_name'] = $data['patient_name']
-            ?: trim(($fd['patient_last_name'] ?? '') . ', ' . ($fd['patient_first_name'] ?? ''), ' ,') ?: null;
+        $data['patient_name'] = trim(($fd['patient_last_name'] ?? '') . ', ' . ($fd['patient_first_name'] ?? ''), ' ,') ?: null;
 
         return $data;
     }
