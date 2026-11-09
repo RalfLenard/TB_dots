@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
-import NavUser from '@/components/NavUser.vue';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar';
 import { type NavItem } from '@/types';
 import { Link } from '@inertiajs/vue3';
-import { BookOpen, FileText, Folder, Stethoscope, Dumbbell } from 'lucide-vue-next';
+import { BookOpen, Dumbbell, FileText, Folder, HeartPulse, Stethoscope } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
 // Both `href` and `url` are set because NavMain may read either one
@@ -29,12 +28,11 @@ const mainNavItems = [
         url: '/fit-to-work',
         icon: Dumbbell,
     },
-
     {
-        title: 'aics',
+        title: 'AICS',
         href: '/aics',
         url: '/aics',
-        icon: Dumbbell,
+        icon: HeartPulse,
     },
 ] as NavItem[];
 
@@ -49,7 +47,6 @@ const footerNavItems: NavItem[] = [
         href: 'https://laravel.com/docs/starter-kits',
         icon: BookOpen,
     },
-    
 ];
 </script>
 
@@ -72,9 +69,6 @@ const footerNavItems: NavItem[] = [
             <NavMain :items="mainNavItems" />
         </SidebarContent>
 
-        <SidebarFooter>
-            <NavFooter :items="footerNavItems" />
-            <NavUser />
-        </SidebarFooter>
+       
     </Sidebar>
 </template>
