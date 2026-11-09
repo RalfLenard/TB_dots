@@ -1,11 +1,21 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Head, router, useForm } from '@inertiajs/vue3'
+import AppLayout from '@/layouts/AppLayout.vue'
 
 const props = defineProps({
     records: { type: Array, default: () => [] },
     record: { type: Object, default: null },
 })
+
+const BASE = route('medical-certificates.index')
+
+const breadcrumbs = [
+    {
+        title: 'Medical Certificates',
+        href: BASE,
+    },
+]
 
 const CASE_RATES = ['89221', '89222']
 const CHARGES = ['2925.00', '4875.00']
@@ -199,7 +209,9 @@ function save() {
 <template>
     <Head title="PhilHealth CSF + CF-2 Generator" />
 
-    <main class="mx-auto max-w-7xl space-y-6 p-5">
+    <AppLayout :breadcrumbs="breadcrumbs">
+
+    <main class="w-full space-y-6 px-6">
         <header class="flex flex-wrap items-center justify-between gap-3">
             <div>
                 <h1 class="text-2xl font-bold">PhilHealth CSF + CF-2 Generator</h1>
@@ -544,4 +556,5 @@ function save() {
             </div>
         </div>
     </main>
+    </AppLayout>
 </template>
