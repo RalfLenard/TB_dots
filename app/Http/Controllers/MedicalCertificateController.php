@@ -18,6 +18,9 @@ class MedicalCertificateController extends Controller
     /** Print the patient name in capital letters? */
     private const NAME_UPPERCASE = true;
 
+    /** Allowed "rows per page" choices. */
+    private const PER_PAGE_OPTIONS = [10, 25, 50];
+
     /** Fixed wording (the template only keeps the letterhead, the title and "NOT VALID WITHOUT SEAL"). */
     private const SALUTATION = 'To whom it may concern,';
     private const CLOSING    = 'This certification is issued upon request and may be used for whatever medical purpose it may serve.';
@@ -51,6 +54,11 @@ class MedicalCertificateController extends Controller
 
     public function index(Request $request): Response
     {
+        $perPage = (int) $request->input('per_page', self::PER_PAGE_OPTIONS[0]);
+        if (! in_array($perPage, self::PER_PAGE_OPTIONS, true)) {
+            $perPage = self::PER_PAGE_OPTIONS[0];
+        }
+
         $certificates = MedicalCertificate::query()
             ->when($request->filled('search'), function ($q) use ($request) {
                 $s = '%' . trim($request->string('search')) . '%';
@@ -62,34 +70,40 @@ class MedicalCertificateController extends Controller
             })
             ->latest('certificate_date')
             ->latest('id')
-            ->paginate(10)
+            ->paginate($perPage)
             ->withQueryString()
             ->through(fn (MedicalCertificate $c) => [
-                'id'               => $c->id,
-                'full_name'        => $c->full_name,
-                'age'              => $c->age,
-                'barangay'         => $c->barangay,
-                'assessment'       => $c->assessment,
-                'rest_days'        => $c->rest_days,
-                'fit_type'         => $c->fit_type,
-                'fit_date'         => $c->fit_date->format('M d, Y'),
-                'physician_name'   => $c->physician_name,
-                'certificate_date' => $c->certificate_date->format('M d, Y'),
+                'id'                   => $c->id,
+                'full_name'            => $c->full_name,
+                'age'                  => $c->age,
+                'barangay'             => $c->barangay,
+                'assessment'           => $c->assessment,
+                'rest_days'            => $c->rest_days,
+                'fit_type'             => $c->fit_type,
+                'fit_date'             => $c->fit_date->format('M d, Y'),
+                'fit_date_raw'         => $c->fit_date->format('Y-m-d'),          // for the edit form
+                'physician_name'       => $c->physician_name,
+                'certificate_date'     => $c->certificate_date->format('M d, Y'),
+                'certificate_date_raw' => $c->certificate_date->format('Y-m-d'),  // for the edit form
             ]);
 
         return Inertia::render('MedicalCertificates/Index', [
-            'certificates' => $certificates,
-            'filters'      => ['search' => $request->input('search', '')],
-            'physicians'   => collect(MedicalCertificate::PHYSICIANS)
+            'certificates'   => $certificates,
+            'filters'        => [
+                'search'   => $request->input('search', ''),
+                'per_page' => $perPage,
+            ],
+            'perPageOptions' => self::PER_PAGE_OPTIONS,
+            'physicians'     => collect(MedicalCertificate::PHYSICIANS)
                                 ->map(fn ($info, $name) => [
                                     'name'           => $name,
                                     'position'       => $info['position'],
                                     'license_number' => $info['license'],
                                 ])
                                 ->values(),
-            'fitTypes'     => MedicalCertificate::FIT_TYPES,
-            'today'        => now()->toDateString(),
-            'flash'        => [
+            'fitTypes'       => MedicalCertificate::FIT_TYPES,
+            'today'          => now()->toDateString(),
+            'flash'          => [
                 'success'  => session('success'),
                 'print_id' => session('print_id'),
             ],
@@ -97,6 +111,36 @@ class MedicalCertificateController extends Controller
     }
 
     public function store(Request $request): RedirectResponse
+    {
+        $certificate = MedicalCertificate::create($this->validated($request));
+
+        return redirect()
+            ->route('medical-certificates.index')
+            ->with('success', 'Medical certificate created.')
+            ->with('print_id', $certificate->id);
+    }
+
+    public function update(Request $request, MedicalCertificate $medicalCertificate): RedirectResponse
+    {
+        $medicalCertificate->update($this->validated($request));
+
+        return redirect()
+            ->back()
+            ->with('success', 'Medical certificate updated.')
+            ->with('print_id', $medicalCertificate->id);
+    }
+
+    public function destroy(MedicalCertificate $medicalCertificate): RedirectResponse
+    {
+        $medicalCertificate->delete();
+
+        return redirect()
+            ->back()
+            ->with('success', 'Medical certificate deleted.');
+    }
+
+    /** Shared by store() and update(). */
+    private function validated(Request $request): array
     {
         $data = $request->validate([
             'certificate_date' => ['required', 'date'],
@@ -118,21 +162,7 @@ class MedicalCertificateController extends Controller
         $data['position']       = $physician['position'];
         $data['license_number'] = $physician['license'];
 
-        $certificate = MedicalCertificate::create($data);
-
-        return redirect()
-            ->route('medical-certificates.index')
-            ->with('success', 'Medical certificate created.')
-            ->with('print_id', $certificate->id);
-    }
-
-    public function destroy(MedicalCertificate $medicalCertificate): RedirectResponse
-    {
-        $medicalCertificate->delete();
-
-        return redirect()
-            ->route('medical-certificates.index')
-            ->with('success', 'Medical certificate deleted.');
+        return $data;
     }
 
     /* ------------------------------- PDF ------------------------------- */

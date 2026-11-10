@@ -34,20 +34,14 @@ const mainNavItems = [
         url: '/aics',
         icon: HeartPulse,
     },
+     {
+        title: 'Employment Medical Certificates',
+        href: '/employment-medical-certificates',
+        url: '/employment-medical-certificates',
+        icon: HeartPulse,
+    },
 ] as NavItem[];
 
-const footerNavItems: NavItem[] = [
-    {
-        title: 'Github Repo',
-        href: 'https://github.com/laravel/vue-starter-kit',
-        icon: Folder,
-    },
-    {
-        title: 'Documentation',
-        href: 'https://laravel.com/docs/starter-kits',
-        icon: BookOpen,
-    },
-];
 </script>
 
 <template>

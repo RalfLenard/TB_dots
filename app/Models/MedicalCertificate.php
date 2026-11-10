@@ -22,6 +22,11 @@ class MedicalCertificate extends Model
             'position' => 'Municipal Health Officer',
             'license'  => '0085070',
         ],
+
+         'Leilani D. Fernandez' => [
+            'position' => 'Rural Health Physician',
+            'license'  => '92152',
+        ],
     ];
 
     public const FIT_TYPES = ['work' => 'Work', 'study' => 'Study'];

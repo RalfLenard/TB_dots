@@ -1,18 +1,20 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Head, router, useForm } from '@inertiajs/vue3'
+import { Head, Link, router, useForm } from '@inertiajs/vue3'
 import AppLayout from '@/layouts/AppLayout.vue'
 
 const props = defineProps({
-    records: { type: Array, default: () => [] },
+    records: { type: Object, required: true },     // Laravel paginator { data, links, from, to, total, current_page, ... }
+    filters: { type: Object, default: () => ({}) }, // { search, per_page }
+    perPageOptions: { type: Array, default: () => [10, 25, 50] },
     record: { type: Object, default: null },
 })
 
-const BASE = route('medical-certificates.index')
+const BASE = '/pdf-records'
 
 const breadcrumbs = [
     {
-        title: 'Medical Certificates',
+        title: 'PhilHealth CSF + CF-2',
         href: BASE,
     },
 ]
@@ -115,6 +117,35 @@ const form = useForm({
     form_data: withDefaults(props.record?.form_data),
 })
 
+// ---- Records table: server-side search + rows per page + pagination ------
+const search = ref(props.filters?.search ?? '')
+const perPage = ref(props.filters?.per_page ?? props.perPageOptions[0] ?? 10)
+
+/** Current list state as a query object (page is only sent when it is not page 1). */
+function listQuery({ withPage = false } = {}) {
+    const q = {}
+    if (search.value) q.search = search.value
+    if (perPage.value !== props.perPageOptions[0]) q.per_page = perPage.value
+    if (withPage && props.records?.current_page > 1) q.page = props.records.current_page
+    return q
+}
+
+// Search / page size changes always go back to page 1.
+function reloadList() {
+    router.get(BASE, listQuery(), {
+        preserveState: true,
+        preserveScroll: true,
+        replace: true,
+    })
+}
+
+let timer = null
+watch(search, () => {
+    clearTimeout(timer)
+    timer = setTimeout(reloadList, 300)
+})
+watch(perPage, reloadList)
+
 // ---- Modal -------------------------------------------------------------
 // Open automatically when a record is loaded (edit / after save); closed when none.
 const showModal = ref(!!props.record)
@@ -133,7 +164,7 @@ watch(showModal, (open) => {
 function openNew() {
     if (props.record) {
         // leave the edit URL first; the modal is reopened blank when the page has loaded
-        router.get('/pdf-records', {}, {
+        router.get(BASE, listQuery({ withPage: true }), {
             preserveScroll: true,
             onSuccess: () => { showModal.value = true },
         })
@@ -146,13 +177,14 @@ function openNew() {
 }
 
 function openRecord(id) {
-    router.get(`/pdf-records/${id}/edit`, {}, { preserveScroll: true })
+    // keep the current page / search so the table is still there after closing or saving
+    router.get(`${BASE}/${id}/edit`, listQuery({ withPage: true }), { preserveScroll: true })
 }
 
 function closeModal() {
     showModal.value = false
     if (props.record) {
-        router.get('/pdf-records', {}, { preserveScroll: true })
+        router.get(BASE, listQuery({ withPage: true }), { preserveScroll: true })
     }
 }
 
@@ -163,17 +195,8 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
     window.removeEventListener('keydown', onKey)
+    clearTimeout(timer)
     document.body.style.overflow = ''
-})
-
-// ---- Records table -------------------------------------------------------
-const search = ref('')
-const filteredRecords = computed(() => {
-    const q = search.value.trim().toLowerCase()
-    if (!q) return props.records
-    return props.records.filter((r) =>
-        `${r.record_no ?? ''} ${r.patient_name ?? ''}`.toLowerCase().includes(q)
-    )
 })
 
 const formatDate = (value) => {
@@ -193,15 +216,19 @@ const stamp = ref(Date.now())
 
 const previewUrl = computed(() =>
     props.record?.id
-        ? `/pdf-records/${props.record.id}/preview?v=${encodeURIComponent(props.record.updated_at ?? '')}-${stamp.value}`
+        ? `${BASE}/${props.record.id}/preview?v=${encodeURIComponent(props.record.updated_at ?? '')}-${stamp.value}`
         : null
 )
 
 function save() {
     if (props.record?.id) {
-        form.put(`/pdf-records/${props.record.id}`, { onSuccess: () => { stamp.value = Date.now() } })
+        // send the list state along so the server redirects back to the same page of the table
+        const qs = new URLSearchParams(listQuery({ withPage: true })).toString()
+        form.put(`${BASE}/${props.record.id}${qs ? `?${qs}` : ''}`, {
+            onSuccess: () => { stamp.value = Date.now() },
+        })
     } else {
-        form.post('/pdf-records')
+        form.post(BASE)
     }
 }
 </script>
@@ -225,8 +252,16 @@ function save() {
         <!-- RECORDS TABLE -->
         <section class="rounded-xl border">
             <div class="flex flex-wrap items-center justify-between gap-3 border-b p-4">
-                <h2 class="font-semibold">Saved records <span class="text-sm font-normal text-gray-500">({{ filteredRecords.length }})</span></h2>
-                <input v-model="search" type="search" placeholder="Search record no. or patient…" class="w-full rounded border p-2 text-sm sm:w-72" />
+                <h2 class="font-semibold">Saved records <span class="text-sm font-normal text-gray-500">({{ records.total }})</span></h2>
+                <div class="flex flex-wrap items-center gap-3">
+                    <input v-model="search" type="search" placeholder="Search record no. or patient…" class="w-full rounded border p-2 text-sm sm:w-72" />
+                    <label class="flex items-center gap-2 text-sm text-gray-600">
+                        Rows per page
+                        <select v-model.number="perPage" class="rounded border p-2 text-sm">
+                            <option v-for="n in perPageOptions" :key="n" :value="n">{{ n }}</option>
+                        </select>
+                    </label>
+                </div>
             </div>
 
             <div class="overflow-x-auto">
@@ -241,9 +276,9 @@ function save() {
                         </tr>
                     </thead>
                     <tbody>
-                        <tr v-for="(item, index) in filteredRecords" :key="item.id"
+                        <tr v-for="(item, index) in records.data" :key="item.id"
                             class="border-t hover:bg-gray-50" :class="{ 'bg-blue-50': record?.id === item.id }">
-                            <td class="px-4 py-3 text-gray-500">{{ index + 1 }}</td>
+                            <td class="px-4 py-3 text-gray-500">{{ (records.from ?? 1) + index }}</td>
                             <td class="px-4 py-3 font-medium">{{ item.record_no || `Record #${item.id}` }}</td>
                             <td class="px-4 py-3">{{ item.patient_name || 'Unnamed patient' }}</td>
                             <td class="px-4 py-3 text-gray-500">{{ formatDate(item.created_at) }}</td>
@@ -252,19 +287,42 @@ function save() {
                                     <button type="button" @click="openRecord(item.id)" class="rounded border px-3 py-1 text-blue-700 hover:bg-blue-50">
                                         Edit
                                     </button>
-                                    <a :href="`/pdf-records/${item.id}/preview`" target="_blank" class="rounded bg-gray-800 px-3 py-1 text-white hover:bg-gray-900">
+                                    <a :href="`${BASE}/${item.id}/preview`" target="_blank" class="rounded bg-gray-800 px-3 py-1 text-white hover:bg-gray-900">
                                         PDF
                                     </a>
                                 </div>
                             </td>
                         </tr>
-                        <tr v-if="!filteredRecords.length">
+                        <tr v-if="!records.data.length">
                             <td colspan="5" class="px-4 py-8 text-center text-gray-500">
-                                {{ records.length ? 'No records match your search.' : 'No records yet. Click "New record" to create one.' }}
+                                {{ search ? 'No records match your search.' : 'No records yet. Click "New record" to create one.' }}
                             </td>
                         </tr>
                     </tbody>
                 </table>
+            </div>
+
+            <!-- Pagination -->
+            <div v-if="records.total > 0" class="flex flex-wrap items-center justify-between gap-3 border-t p-4">
+                <p class="text-sm text-gray-600">
+                    Showing <span class="font-medium">{{ records.from }}</span>
+                    to <span class="font-medium">{{ records.to }}</span>
+                    of <span class="font-medium">{{ records.total }}</span> records
+                </p>
+
+                <nav v-if="records.links.length > 3" class="flex flex-wrap gap-1">
+                    <template v-for="(link, i) in records.links" :key="i">
+                        <Link
+                            v-if="link.url"
+                            :href="link.url"
+                            preserve-scroll
+                            class="rounded border px-3 py-1 text-sm"
+                            :class="link.active ? 'border-blue-700 bg-blue-700 text-white' : 'border-gray-300 bg-white text-gray-900 hover:bg-gray-100'"
+                            v-html="link.label"
+                        />
+                        <span v-else class="rounded border border-gray-200 px-3 py-1 text-sm text-gray-400" v-html="link.label" />
+                    </template>
+                </nav>
             </div>
         </section>
 

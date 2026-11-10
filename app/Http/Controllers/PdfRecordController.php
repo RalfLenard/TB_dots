@@ -12,6 +12,9 @@ class PdfRecordController extends Controller
     /** All coordinates are "pixels" of a page rendered 893px wide (measured from csf_cf2.pdf). */
     private const REF_W = 893;
 
+    /** Allowed "rows per page" choices for the records table. */
+    private const PER_PAGE_OPTIONS = [10, 25, 50];
+
     /** When the patient IS the member: copy member PIN into the dependent PIN boxes? */
     private const FILL_DEPENDENT_PIN_WHEN_MEMBER = true;
 
@@ -95,25 +98,69 @@ class PdfRecordController extends Controller
     /** Live nudges for page 3 (px). Override in the URL: ?acc_dy=-2&date_dy=-3&name_dy=-4 */
     private array $nudge = ['acc' => self::CF2B_ACCRED_DY, 'date' => self::CF2B_DATE_DY, 'name' => self::CF2B_NAME_DY];
 
-    private function listing()
+    /* ------------------------- list + pagination ------------------------- */
+
+    /** Rows per page, limited to the allowed choices. */
+    private function perPage(Request $request): int
     {
-        return PdfRecord::query()->latest()->limit(100)
-            ->get(['id', 'record_no', 'patient_name', 'created_at']);
+        $perPage = (int) $request->input('per_page', self::PER_PAGE_OPTIONS[0]);
+
+        return in_array($perPage, self::PER_PAGE_OPTIONS, true) ? $perPage : self::PER_PAGE_OPTIONS[0];
     }
 
-    public function index()
+    /** The list-related query string (search / per_page / page) that should survive edit and save. */
+    private function listQuery(Request $request): array
     {
-        return Inertia::render('PdfRecords/Index', [
-            'records' => $this->listing(),
-            'record'  => null,
+        return array_filter(
+            $request->only(['search', 'per_page', 'page']),
+            fn ($v) => filled($v)
+        );
+    }
+
+    /** Paginated, searchable list of saved records. */
+    private function listing(Request $request)
+    {
+        $search = trim((string) $request->input('search', ''));
+
+        return PdfRecord::query()
+            ->when($search !== '', function ($q) use ($search) {
+                $like = '%' . $search . '%';
+                $q->where(function ($q) use ($like) {
+                    $q->where('record_no', 'like', $like)
+                      ->orWhere('patient_name', 'like', $like);
+                });
+            })
+            ->latest()
+            ->latest('id')
+            ->select(['id', 'record_no', 'patient_name', 'created_at'])
+            ->paginate($this->perPage($request))
+            ->withQueryString();
+    }
+
+    /** Props shared by index() and edit(). */
+    private function listProps(Request $request): array
+    {
+        return [
+            'records'        => $this->listing($request),
+            'filters'        => [
+                'search'   => trim((string) $request->input('search', '')),
+                'per_page' => $this->perPage($request),
+            ],
+            'perPageOptions' => self::PER_PAGE_OPTIONS,
+        ];
+    }
+
+    public function index(Request $request)
+    {
+        return Inertia::render('PdfRecords/Index', $this->listProps($request) + [
+            'record' => null,
         ]);
     }
 
-    public function edit(PdfRecord $record)
+    public function edit(Request $request, PdfRecord $record)
     {
-        return Inertia::render('PdfRecords/Index', [
-            'records' => $this->listing(),
-            'record'  => $record,
+        return Inertia::render('PdfRecords/Index', $this->listProps($request) + [
+            'record' => $record,
         ]);
     }
 
@@ -141,6 +188,7 @@ class PdfRecordController extends Controller
             'record_no' => 'CSF-' . now()->format('Ym') . '-' . str_pad((string) $record->id, 5, '0', STR_PAD_LEFT),
         ]);
 
+        // A new record is the newest one, so the list goes back to page 1.
         return redirect()->route('pdf-records.edit', $record);
     }
 
@@ -148,7 +196,11 @@ class PdfRecordController extends Controller
     {
         $record->update($this->validated($request));
 
-        return redirect()->route('pdf-records.edit', $record);
+        // Stay on the same page / search / page size of the list.
+        $url   = route('pdf-records.edit', $record);
+        $query = $this->listQuery($request);
+
+        return redirect()->to($query ? $url . '?' . http_build_query($query) : $url);
     }
 
     /** Apply fixed defaults and the "patient is the member" rule. */

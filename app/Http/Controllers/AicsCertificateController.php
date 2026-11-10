@@ -21,6 +21,8 @@ class AicsCertificateController extends Controller
     private const CLOSING    = 'This certification is issued upon request and may be used for whatever medical purpose it may serve.';
     private const HEADING    = 'Recommended management:';
 
+    private const PER_PAGE_OPTIONS = [10, 25, 50];
+
     /* ---------------------------------------------------------------
      |  COORDINATES (px @ 893 wide). y = vertical CENTER of the text.
      |  Use ?grid=1 on the PDF url to check them against the template.
@@ -55,6 +57,11 @@ class AicsCertificateController extends Controller
 
     public function index(Request $request): Response
     {
+        $perPage = (int) $request->input('per_page', 10);
+        if (! in_array($perPage, self::PER_PAGE_OPTIONS, true)) {
+            $perPage = 10;
+        }
+
         $certificates = AicsCertificate::query()
             ->when($request->filled('search'), function ($q) use ($request) {
                 $s = '%' . trim($request->string('search')) . '%';
@@ -66,7 +73,7 @@ class AicsCertificateController extends Controller
             })
             ->latest('certificate_date')
             ->latest('id')
-            ->paginate(10)
+            ->paginate($perPage)
             ->withQueryString()
             ->through(fn (AicsCertificate $c) => [
                 'id'               => $c->id,
@@ -76,20 +83,27 @@ class AicsCertificateController extends Controller
                 'diagnosis'        => $c->diagnosis,
                 'physician_name'   => $c->physician_name,
                 'certificate_date' => $c->certificate_date->format('M d, Y'),
+                // raw values used to pre-fill the edit form
+                'date_raw'         => $c->certificate_date->toDateString(),
+                'recommendations'  => $this->recommendationList($c->recommendations),
             ]);
 
         return Inertia::render('Aics/Index', [
-            'certificates' => $certificates,
-            'filters'      => ['search' => $request->input('search', '')],
-            'physicians'   => collect(AicsCertificate::PHYSICIANS)
-                                ->map(fn ($info, $name) => [
-                                    'name'           => $name,
-                                    'position'       => $info['position'],
-                                    'license_number' => $info['license'],
-                                ])
-                                ->values(),
-            'today'        => now()->toDateString(),
-            'flash'        => [
+            'certificates'   => $certificates,
+            'filters'        => [
+                'search'   => $request->input('search', ''),
+                'per_page' => $perPage,
+            ],
+            'perPageOptions' => self::PER_PAGE_OPTIONS,
+            'physicians'     => collect(AicsCertificate::PHYSICIANS)
+                                  ->map(fn ($info, $name) => [
+                                      'name'           => $name,
+                                      'position'       => $info['position'],
+                                      'license_number' => $info['license'],
+                                  ])
+                                  ->values(),
+            'today'          => now()->toDateString(),
+            'flash'          => [
                 'success'  => session('success'),
                 'print_id' => session('print_id'),
             ],
@@ -97,6 +111,36 @@ class AicsCertificateController extends Controller
     }
 
     public function store(Request $request): RedirectResponse
+    {
+        $certificate = AicsCertificate::create($this->validated($request));
+
+        return redirect()
+            ->route('aics.index')
+            ->with('success', 'AICS certificate created.')
+            ->with('print_id', $certificate->id);
+    }
+
+    public function update(Request $request, AicsCertificate $aicsCertificate): RedirectResponse
+    {
+        $aicsCertificate->update($this->validated($request));
+
+        return redirect()
+            ->back()
+            ->with('success', 'AICS certificate updated.')
+            ->with('print_id', $aicsCertificate->id);
+    }
+
+    public function destroy(AicsCertificate $aicsCertificate): RedirectResponse
+    {
+        $aicsCertificate->delete();
+
+        return redirect()
+            ->back()
+            ->with('success', 'AICS certificate deleted.');
+    }
+
+    /** Shared by store() and update(). */
+    private function validated(Request $request): array
     {
         $data = $request->validate([
             'certificate_date'  => ['required', 'date'],
@@ -125,21 +169,32 @@ class AicsCertificateController extends Controller
         $data['position']       = $physician['position'];
         $data['license_number'] = $physician['license'];
 
-        $certificate = AicsCertificate::create($data);
-
-        return redirect()
-            ->route('aics.index')
-            ->with('success', 'AICS certificate created.')
-            ->with('print_id', $certificate->id);
+        return $data;
     }
 
-    public function destroy(AicsCertificate $aicsCertificate): RedirectResponse
+    /**
+     * Always returns a plain list of non-empty strings, whether the stored value
+     * is an array, a JSON string, or a double-encoded JSON string.
+     */
+    private function recommendationList(mixed $value): array
     {
-        $aicsCertificate->delete();
+        for ($i = 0; $i < 2 && is_string($value); $i++) {
+            $decoded = json_decode($value, true);
+            if ($decoded === null && json_last_error() !== JSON_ERROR_NONE) {
+                break;
+            }
+            $value = $decoded;
+        }
 
-        return redirect()
-            ->route('aics.index')
-            ->with('success', 'AICS certificate deleted.');
+        if (is_string($value)) {
+            $value = [$value];
+        }
+
+        return collect(is_array($value) ? $value : [])
+            ->filter(fn ($v) => is_string($v) && trim($v) !== '')
+            ->map(fn ($v) => trim($v))
+            ->values()
+            ->all();
     }
 
     /* ------------------------------- PDF ------------------------------- */
@@ -216,7 +271,7 @@ class AicsCertificateController extends Controller
         $name = self::NAME_UPPERCASE ? mb_strtoupper($c->full_name) : $c->full_name;
 
         $brgy = trim(preg_replace('/^\s*(?:brgy\.?|barangay)\s+/i', '', $c->barangay));
-        $recs = array_values(array_filter($c->recommendations ?? []));
+        $recs = $this->recommendationList($c->recommendations);
 
         $bodyW = self::BODY_W * $k;
         $right = (self::BODY_X + self::BODY_W);
