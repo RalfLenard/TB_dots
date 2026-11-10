@@ -36,7 +36,7 @@
 <VirtualHost *:80>
     ServerAdmin admin@rhu1.com
     DocumentRoot "C:/xampp/htdocs/sanitary/public"
-    ServerName rhu1.com
+    ServerName rhui.com
     <Directory "C:/xampp/htdocs/sanitary/public">
 	AllowOverride All
 	Require all granted
